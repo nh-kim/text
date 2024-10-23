@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>소리에 반응하는 파도 텍스트</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #001420;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: 'Pretendard', sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+
+        #header {
+            width: 100%;
+            padding: 20px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.2);
+            position: fixed;
+            top: 0;
+            z-index: 100;
+        }
+
+        #thoughtInput {
+            width: 80%;
+            max-width: 800px;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 1.5em;
+            padding: 15px;
+            text-align: center;
+        }
+
+        #thoughtInput:focus {
+            outline: none;
+            border-bottom-color: rgba(255, 255, 255, 0.5);
+        }
+
+        #waveContainer {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 60vh;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .wave-text {
+            position: absolute;
+            font-size: 1.2em;
+            color: rgba(255, 255, 255, 0.8);
+            text-align: center;
+            transition: transform 0.1s ease-out;
+        }
+
+        #startButton {
+            padding: 10px 20px;
+            margin-top: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #startButton:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        #volumeIndicator {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            width: 30px;
+            height: 100px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+        }
+
+        #volumeBar {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 15px;
+            transition: height 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <input type="text" id="thoughtInput" placeholder="당신의 생각을 적어보세요... (엔터를 눌러 기록)" autocomplete="off">
+        <button id="startButton">마이크 시작</button>
+    </div>
+    <div id="waveContainer"></div>
+    <div id="volumeIndicator"><div id="volumeBar"></div></div>
+
+    <script>
+        let audioContext, analyser, microphone;
+        let isListening = false;
+        let thoughts = [];
+        let animationId = null;
+        
+        const waveContainer = document.getElementById('waveContainer');
+        const thoughtInput = document.getElementById('thoughtInput');
+        const startButton = document.getElementById('startButton');
+        const volumeBar = document.getElementById('volumeBar');
+
+        // 마이크 시작/중지 버튼
+        startButton.addEventListener('click', async () => {
+            if (!isListening) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    startAudioAnalysis(stream);
+                    startButton.textContent = '마이크 중지';
+                    isListening = true;
+                } catch (err) {
+                    console.error('마이크 접근 오류:', err);
+                    alert('마이크 접근이 거부되었습니다.');
+                }
+            } else {
+                stopAudioAnalysis();
+                startButton.textContent = '마이크 시작';
+                isListening = false;
+            }
+        });
+
+        function startAudioAnalysis(stream) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            microphone = audioContext.createMediaStreamSource(stream);
+            
+            analyser.fftSize = 32;
+            analyser.smoothingTimeConstant = 0.8;
+            
+            microphone.connect(analyser);
+            
+            updateAudio();
+        }
+
+        function stopAudioAnalysis() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            if (microphone) {
+                microphone.mediaStream.getTracks().forEach(track => track.stop());
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+            thoughts.forEach(thought => {
+                thought.element.style.transform = 'translateY(0)';
+            });
+            volumeBar.style.height = '0%';
+        }
+
+        function updateAudio() {
+            if (!isListening) return;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            
+            // 평균 음량 계산 (0-1 사이 값)
+            const volume = dataArray.reduce((sum, value) => sum + value, 0) / 
+                         (dataArray.length * 255);
+
+            // 볼륨 바 업데이트
+            volumeBar.style.height = `${volume * 100}%`;
+
+            // 각 텍스트에 파도 효과 적용
+            thoughts.forEach((thought, index) => {
+                const time = Date.now() * 0.002;
+                const delay = index * 0.5;
+                const baseAmount = Math.sin(time + delay) * 20;
+                const amplifiedAmount = baseAmount * (1 + volume * 2);
+                
+                thought.element.style.transform = `translateY(${amplifiedAmount}px)`;
+            });
+
+            animationId = requestAnimationFrame(updateAudio);
+        }
+
+        // 텍스트 입력 처리
+        thoughtInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && thoughtInput.value.trim()) {
+                addNewThought(thoughtInput.value.trim());
+                thoughtInput.value = '';
+            }
+        });
+
+        function addNewThought(text) {
+            const thought = document.createElement('div');
+            thought.className = 'wave-text';
+            thought.textContent = text;
+            waveContainer.appendChild(thought);
+            
+            thoughts.push({
+                element: thought,
+                text: text
+            });
+            
+            updateWaveLayout();
+        }
+
+        function updateWaveLayout() {
+            const centerX = waveContainer.clientWidth / 2;
+            const centerY = waveContainer.clientHeight / 2;
+            const radius = Math.min(waveContainer.clientWidth, waveContainer.clientHeight) * 0.3;
+            
+            thoughts.forEach((thought, index) => {
+                const angle = (index / thoughts.length) * Math.PI;
+                const x = centerX + Math.cos(angle) * radius - (thought.element.clientWidth / 2);
+                const y = centerY + Math.sin(angle) * 30;
+                
+                thought.element.style.left = `${x}px`;
+                thought.element.style.top = `${y}px`;
+            });
+        }
+
+        // 창 크기 변경 시 레이아웃 업데이트
+        window.addEventListener('resize', updateWaveLayout);
+    </script>
+</body>
+</html>
